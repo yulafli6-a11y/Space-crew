@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+
+<title>Space Crew Online</title>
+
+<script src="/socket.io/socket.io.js"></script>
+
+<style>
+* {
+  box-sizing: border-box;
+  user-select: none;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background: #080b14;
+  color: white;
+  font-family: Arial, sans-serif;
+}
+
+canvas {
+  display: block;
+  background: #101827;
+}
+
+#menu {
+  position: fixed;
+  inset: 0;
+  background: #080b14;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+
+#menu h1 {
+  font-size: 42px;
+  margin-bottom: 25px;
+}
+
+#menu input {
+  width: 240px;
+  padding: 14px;
+  border: 0;
+  border-radius: 10px;
+  margin-bottom: 10px;
+  font-size: 16px;
+}
+
+button {
+  border: 0;
+  border-radius: 10px;
+  padding: 12px 18px;
+  background: #3b82f6;
+  color: white;
+  font-weight: bold;
+}
+
+#hud {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 5;
+}
+
+#status {
+  background: #101827dd;
+  border: 2px solid #374151;
+  border-radius: 12px;
+  padding: 10px;
+}
+
+#chat {
+  position: fixed;
+  left: 10px;
+  bottom: 10px;
+  width: 310px;
+  z-index: 10;
+}
+
+#messages {
+  height: 150px;
+  overflow-y: auto;
+  padding: 10px;
+  background: #080b14dd;
+  border-radius: 10px;
+  margin-bottom: 5px;
+}
+
+#chatInput {
+  width: 220px;
+  padding: 10px;
+  border: 0;
+  border-radius: 8px;
+}
+
+#controls {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 10;
+}
+
+#controls button {
+  width: 55px;
+  height: 55px;
+  padding: 0;
+  margin: 2px;
+  font-size: 20px;
+}
+
+.room {
+  position: absolute;
+}
+
+</style>
+</head>
+
+<body>
+
+<div id="menu">
+
+  <h1>🚀 SPACE CREW</h1>
+
+  <input
+    id="nameInput"
+    maxlength="16"
+    placeholder="Astronot adın"
+  >
+
+  <button id="startButton">
+    OYUNA BAŞLA
+  </button>
+
+</div>
+
+<canvas id="game"></canvas>
+
+<div id="hud">
+
+  <div id="status">
+    🌐 Online |
+    Oyuncular:
+    <span id="playerCount">0</span>
+  </div>
+
+</div>
+
+<div id="chat">
+
+  <div id="messages"></div>
+
+  <input
+    id="chatInput"
+    maxlength="120"
+    placeholder="Free Chat..."
+  >
+
+  <button id="sendButton">
+    Gönder
+  </button>
+
+</div>
+
+<div id="controls">
+
+  <div>
+    <button data-key="w">▲</button>
+  </div>
+
+  <div>
+    <button data-key="a">◀</button>
+    <button data-key="s">▼</button>
+    <button data-key="d">▶</button>
+  </div>
+
+</div>
+
+<script>
+
+const socket = io();
+
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+function resize() {
+  canvas.width = innerWidth;
+  canvas.height = innerHeight;
+}
+
+resize();
+
+window.addEventListener("resize", resize);
+
+let playing = false;
+
+const keys = {
+  w: false,
+  a: false,
+  s: false,
+  d: false
+};
+
+const me = {
+  x: 600,
+  y: 350,
+  speed: 4,
+  color: "#e53935",
+  name: "Astronot"
+};
+
+const players = {};
+
+document.getElementById("startButton")
+.addEventListener("click", () => {
+
+  const name =
+    document.getElementById("nameInput")
+    .value
+    .trim();
+
+  if (name) {
+    me.name = name.substring(0, 16);
+  }
+
+  socket.emit("setName", me.name);
+
+  playing = true;
+
+  document.getElementById("menu")
+  .style.display = "none";
+});
+
+document.addEventListener("keydown", (event) => {
+
+  const key = event.key.toLowerCase();
+
+  if (key in keys) {
+    keys[key] = true;
+    event.preventDefault();
+  }
+
+  if (event.key === "Enter") {
+    sendChat();
+  }
+});
+
+document.addEventListener("keyup", (event) => {
+
+  const key = event.key.toLowerCase();
+
+  if (key in keys) {
+    keys[key] = false;
+  }
+});
+
+document.querySelectorAll("#controls button")
+.forEach(button => {
+
+  const key = button.dataset.key;
+
+  button.addEventListener("pointerdown", () => {
+    keys[key] = true;
+  });
+
+  button.addEventListener("pointerup", () => {
+    keys[key] = false;
+  });
+
+  button.addEventListener("pointerleave", () => {
+    keys[key] = false;
+  });
+
+});
+
+socket.on("playerList", (list) => {
+
+  for (const id in players) {
+
+    if (!list[id]) {
+      players[id].element.remove();
+      delete players[id];
+    }
+
+  }
+
+  for (const id in list) {
+
+    if (id === socket.id) {
+      me.color = list[id].color;
+      me.x = list[id].x;
+      me.y = list[id].y;
+    } else {
+      createOtherPlayer(list[id]);
+    }
+
+  }
+
+  updatePlayerCount();
+});
+
+socket.on("playerJoined", (player) => {
+
+  if (player.id !== socket.id) {
+    createOtherPlayer(player);
+  }
+
+  updatePlayerCount();
+});
+
+socket.on("playerMoved", (data) => {
+
+  if (!players[data.id]) return;
+
+  players[data.id].x = data.x;
+  players[data.id].y = data.y;
+
+  updateOtherPlayer(data.id);
+});
+
+socket.on("playerLeft", (id) => {
+
+  if (players[id]) {
+    players[id].element.remove();
+    delete players[id];
+  }
+
+  updatePlayerCount();
+});
+
+function createOtherPlayer(player) {
+
+  if (players[player.id]) {
+    players[player.id].element.remove();
+  }
+
+  const element = document.createElement("div");
+
+  element.style.position = "fixed";
+  element.style.width = "42px";
+  element.style.height = "55px";
+  element.style.pointerEvents = "none";
+  element.style.zIndex = "4";
+
+  element.innerHTML = `
+    <div style="
+      position:absolute;
+      left:5px;
+      bottom:0;
+      width:32px;
+      height:38px;
+      border-radius:15px 15px 10px 10px;
+      background:${player.color};
+    "></div>
+
+    <div style="
+      position:absolute;
+      left:15px;
+      top:5px;
+      width:25px;
+      height:17px;
+      background:#b9f4ff;
+      border:3px solid #26384b;
+      border-radius:12px;
+    "></div>
+
+    <div style="
+      position:absolute;
+      width:120px;
+      left:-39px;
+      top:-20px;
+      text-align:center;
+      color:white;
+      font-size:11px;
+    ">
+      ${escapeHTML(player.name)}
+    </div>
+  `;
+
+  document.body.appendChild(element);
+
+  players[player.id] = {
+    x: player.x,
+    y: player.y,
+    element
+  };
+
+  updateOtherPlayer(player.id);
+}
+
+function updateOtherPlayer(id) {
+
+  const p = players[id];
+
+  if (!p) return;
+
+  p.element.style.left =
+    (p.x - 21) + "px";
+
+  p.element.style.top =
+    (p.y - 27) + "px";
+}
+
+function updatePlayerCount() {
+
+  document.getElementById("playerCount")
+  .textContent =
+    Object.keys(players).length + 1;
+}
+
+function update() {
+
+  if (!playing) return;
+
+  let moved = false;
+
+  if (keys.w) {
+    me.y -= me.speed;
+    moved = true;
+  }
+
+  if (keys.s) {
+    me.y += me.speed;
+    moved = true;
+  }
+
+  if (keys.a) {
+    me.x -= me.speed;
+    moved = true;
+  }
+
+  if (keys.d) {
+    me.x += me.speed;
+    moved = true;
+  }
+
+  me.x = Math.max(
+    30,
+    Math.min(canvas.width - 30, me.x)
+  );
+
+  me.y = Math.max(
+    30,
+    Math.min(canvas.height - 30, me.y)
+  );
+
+  if (moved) {
+
+    socket.emit("move", {
+      x: me.x,
+      y: me.y
+    });
+
+  }
+}
+
+function draw() {
+
+  ctx.clearRect(
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  );
+
+  ctx.fillStyle = "#101827";
+
+  ctx.fillRect(
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  );
+
+  drawStars();
+  drawRooms();
+  drawPlayer();
+}
+
+function drawStars() {
+
+  for (let i = 0; i < 80; i++) {
+
+    const x =
+      (i * 137) %
+      canvas.width;
+
+    const y =
+      (i * 83) %
+      canvas.height;
+
+    ctx.fillStyle = "#ffffff55";
+
+    ctx.fillRect(x, y, 2, 2);
+  }
+}
+
+function drawRooms() {
+
+  const rooms = [
+
+    {
+      x: 40,
+      y: 60,
+      w: 260,
+      h: 170,
+      name: "KAFETERYA"
+    },
+
+    {
+      x: canvas.width - 300,
+      y: 60,
+      w: 260,
+      h: 170,
+      name: "KONTROL"
+    },
+
+    {
+      x: 40,
+      y: canvas.height - 230,
+      w: 260,
+      h: 170,
+      name: "REAKTÖR"
+    },
+
+    {
+      x: canvas.width - 300,
+      y: canvas.height - 230,
+      w: 260,
+      h: 170,
+      name: "DEPO"
+    },
+
+    {
+      x: canvas.width / 2 - 150,
+      y: canvas.height / 2 - 100,
+      w: 300,
+      h: 200,
+      name: "ANA ODA"
+    }
+
+  ];
+
+  rooms.forEach(room => {
+
+    ctx.fillStyle = "#27334d";
+    ctx.strokeStyle = "#66789e";
+    ctx.lineWidth = 5;
+
+    ctx.beginPath();
+
+    ctx.roundRect(
+      room.x,
+      room.y,
+      room.w,
+      room.h,
+      20
+    );
+
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = "#c2cbe0";
+    ctx.font = "bold 15px Arial";
+    ctx.textAlign = "center";
+
+    ctx.fillText(
+      room.name,
+      room.x + room.w / 2,
+      room.y + 27
+    );
+
+  });
+}
+
+function drawPlayer() {
+
+  const x = me.x;
+  const y = me.y;
+
+  ctx.fillStyle = me.color;
+
+  ctx.beginPath();
+
+  ctx.roundRect(
+    x - 20,
+    y - 10,
+    40,
+    48,
+    13
+  );
+
+  ctx.fill();
+
+  ctx.fillStyle = "#b9f4ff";
+
+  ctx.beginPath();
+
+  ctx.roundRect(
+    x - 5,
+    y - 3,
+    28,
+    18,
+    8
+  );
+
+  ctx.fill();
+
+  ctx.fillStyle = me.color;
+
+  ctx.fillRect(
+    x - 18,
+    y + 30,
+    12,
+    12
+  );
+
+  ctx.fillRect(
+    x + 6,
+    y + 30,
+    12,
+    12
+  );
+
+  ctx.fillStyle = "white";
+  ctx.font = "13px Arial";
+  ctx.textAlign = "center";
+
+  ctx.fillText(
+    me.name,
+    x,
+    y - 20
+  );
+}
+
+function sendChat() {
+
+  const input =
+    document.getElementById("chatInput");
+
+  const message =
+    input.value.trim();
+
+  if (!message) return;
+
+  socket.emit("chat", message);
+
+  input.value = "";
+}
+
+document.getElementById("sendButton")
+.addEventListener("click", sendChat);
+
+socket.on("chat", (data) => {
+
+  addMessage(
+    data.name,
+    data.message
+  );
+
+});
+
+function addMessage(name, message) {
+
+  const messages =
+    document.getElementById("messages");
+
+  const div =
+    document.createElement("div");
+
+  div.innerHTML =
+    "<b>" +
+    escapeHTML(name) +
+    ":</b> " +
+    escapeHTML(message);
+
+  messages.appendChild(div);
+
+  messages.scrollTop =
+    messages.scrollHeight;
+}
+
+function escapeHTML(text) {
+
+  return text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function loop() {
+
+  update();
+  draw();
+
+  requestAnimationFrame(loop);
+}
+
+loop();
+
+</script>
+
+</body>
+</html>
