@@ -1,0 +1,13 @@
+{
+  "name": "space-crew-online",
+  "version": "1.0.0",
+  "description": "Space Crew online multiplayer game",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "socket.io": "^4.8.1"
+  }
+}
